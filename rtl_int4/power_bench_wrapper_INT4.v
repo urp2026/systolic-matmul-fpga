@@ -1,4 +1,3 @@
-```verilog
 module power_bench_wrapper #(
     parameter SIZE = 4,
     parameter DW   = 4,
@@ -122,4 +121,3 @@ module power_bench_wrapper #(
     );
 
 endmodule
-```
