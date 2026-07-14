@@ -29,7 +29,7 @@ module fpga_top_bram (
     output wire        dp,
     output reg  [7:0]  an
 );
-    localparam SIZE = 4, DW = 16, AW = 32;
+    localparam SIZE = 4, DW = 16, AW = 48;
     localparam AWIDTH = SIZE*SIZE*DW;
     localparam CWIDTH = SIZE*SIZE*AW;
 
