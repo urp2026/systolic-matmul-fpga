@@ -6,7 +6,7 @@
 //   - A,B는 하드웨어 입력, C_golden은 정답
 // =====================================================================
 module tb_golden_compare;
-    localparam SIZE=4, DW=16, AW=34, NCASE=15;
+    localparam SIZE=4, DW=16, AW=48, NCASE=15;
     reg clk=0, rst=1, start=0;
     reg  [SIZE*SIZE*DW-1:0] a_flat, b_flat;
     wire [SIZE*SIZE*AW-1:0] c_flat;
