@@ -12,22 +12,16 @@ module array_multiplier_signed #(parameter W = 4) ( // 기본 폭을 4로 변경
         for (i = 0; i < W-1; i = i + 1) begin : gen_pp
             assign pp[i] = b[i] ? (a_ext << i) : {(2*W){1'b0}};
         end
-        // 마지막 부호 비트 연산 (맥라렌-바스웰 방식 부호 연산 적용)
         assign pp[W-1] = b[W-1] ? (~(a_ext << (W-1)) + 1'b1) : {(2*W){1'b0}};
     endgenerate
 
-    // CSA 함수 정의
     function [2*W-1:0] csa_sum; input [2*W-1:0] x,y,z; csa_sum = x ^ y ^ z;                 endfunction
     function [2*W-1:0] csa_car; input [2*W-1:0] x,y,z; csa_car = ((x&y)|(y&z)|(z&x)) << 1;  endfunction
 
-    // --- W=4 (INT4)에 최적화된 CSA 트리 레이어 ---
-    // pp[0], pp[1], pp[2]를 더해 첫 단계 트리 형성
     wire [2*W-1:0] s0 = csa_sum(pp[0], pp[1], pp[2]), c0 = csa_car(pp[0], pp[1], pp[2]);
     
-    // 남은 부분곱 pp[3]과 이전 단계의 합(s0), 캐리(c0)를 모아서 최종 합산 준비
     wire [2*W-1:0] s1 = csa_sum(s0, c0, pp[3]),        c1 = csa_car(s0, c0, pp[3]);
 
-    // 마지막으로 남은 Carry와 Sum을 리플 캐리 가산기로 마무리
     assign p = s1 + c1;
 
 endmodule
