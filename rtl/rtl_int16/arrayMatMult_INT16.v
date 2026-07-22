@@ -1,5 +1,5 @@
 (* use_dsp = "no" *)
-module array_multiplier_signed #(parameter W = 16) ( // Default를 16(INT16)으로 변경
+module array_multiplier_signed #(parameter W = 16) ( 
     input wire signed  [W-1:0]   a,
     input wire signed  [W-1:0]   b,
     output wire signed [2*W-1:0] p
@@ -19,7 +19,7 @@ module array_multiplier_signed #(parameter W = 16) ( // Default를 16(INT16)으�
 endmodule
 
 
-module pe_ws #(parameter DW = 16, parameter AW = 48) ( // DW=16, AW=48로 조정
+module pe_ws #(parameter DW = 16, parameter AW = 48) ( 
     input wire                 clk,
     input wire                 rst,
     input wire                 load_w,
@@ -45,7 +45,7 @@ module pe_ws #(parameter DW = 16, parameter AW = 48) ( // DW=16, AW=48로 조정
         end 
         else if (en) begin
             a_out  <= a_in;
-            // prod(32-bit signed)가 자동으로 AW-bit(48-bit signed)로 부호 확장되어 더해집니다.
+            
             ps_out <= ps_in + prod;
         end
     end
@@ -88,13 +88,13 @@ module systolic_array_ws #(parameter SIZE = 4, DW = 16, AW = 48) (
 endmodule
 
 
-module matmul_top_ws #(parameter SIZE = 4, DW = 16, AW = 48) ( // DW=16, AW=48로 수정
+module matmul_top_ws #(parameter SIZE = 4, DW = 16, AW = 48) ( 
     input wire                    clk,
     input wire                    rst,
     input wire                    start,
-    input wire [SIZE*SIZE*DW-1:0] a_flat, // INT16 입력 행렬 A (256-bit total for 4x4)
-    input wire [SIZE*SIZE*DW-1:0] b_flat, // INT16 입력 행렬 B (256-bit total for 4x4)
-    output reg [SIZE*SIZE*AW-1:0] c_flat, // INT48 출력 행렬 C (768-bit total for 4x4)
+    input wire [SIZE*SIZE*DW-1:0] a_flat, 
+    input wire [SIZE*SIZE*DW-1:0] b_flat, 
+    output reg [SIZE*SIZE*AW-1:0] c_flat, 
     output reg                    done
 );
     localparam IDLE = 2'd0, LOAD = 2'd1, RUN = 2'd2, FIN = 2'd3;
