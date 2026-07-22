@@ -1,5 +1,5 @@
 (* use_dsp = "no" *)
-module array_multiplier_signed #(parameter W = 4) ( // 기본 폭을 4로 변경
+module array_multiplier_signed #(parameter W = 4) ( 
     input wire signed [W-1:0] a,
     input wire signed [W-1:0] b,
     output wire signed [2*W-1:0] p
@@ -27,7 +27,7 @@ module array_multiplier_signed #(parameter W = 4) ( // 기본 폭을 4로 변경
 endmodule
 
 
-module pe_ws #(parameter DW = 4, parameter AW = 16) (  // DW=4, AW=16으로 수정
+module pe_ws #(parameter DW = 4, parameter AW = 16) (  
     input wire clk,
     input wire rst,
     input wire load_w,
@@ -95,7 +95,7 @@ module systolic_array_ws #(parameter SIZE = 4, DW = 4, AW = 16) (
 endmodule
 
 
-module matmul_top_ws #(parameter SIZE = 4, DW = 4, AW = 16) ( // DW=4, AW=16으로 수정
+module matmul_top_ws #(parameter SIZE = 4, DW = 4, AW = 16) ( 
     input wire clk,
     input wire rst,
     input wire start,
