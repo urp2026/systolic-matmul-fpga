@@ -15,20 +15,20 @@ Table of Contents
 1. Summary
 ----------
 
-+--------------------------+--------------------------------------------+
-| Total On-Chip Power (W)  | 0.100                                      |
-| Design Power Budget (W)  | Unspecified*                               |
-| Power Budget Margin (W)  | NA                                         |
-| Dynamic (W)              | 0.009                                      |
-| Device Static (W)        | 0.091                                      |
-| Effective TJA (C/W)      | 4.6                                        |
-| Max Ambient (C)          | 84.5                                       |
-| Junction Temperature (C) | 25.5                                       |
-| Confidence Level         | High                                       |
-| Setting File             | ---                                        |
-| Simulation Activity File | C:/Users/jaehyeon/power_int16_wallace.saif |
-| Design Nets Matched      | 70%   (1486/2129)                          |
-+--------------------------+--------------------------------------------+
++--------------------------+-----------------------------------------+
+| Total On-Chip Power (W)  | 0.101                                   |
+| Design Power Budget (W)  | Unspecified*                            |
+| Power Budget Margin (W)  | NA                                      |
+| Dynamic (W)              | 0.010                                   |
+| Device Static (W)        | 0.091                                   |
+| Effective TJA (C/W)      | 4.6                                     |
+| Max Ambient (C)          | 84.5                                    |
+| Junction Temperature (C) | 25.5                                    |
+| Confidence Level         | High                                    |
+| Setting File             | ---                                     |
+| Simulation Activity File | C:/Users/yoonj/power_int16_wallace.saif |
+| Design Nets Matched      | 70%   (1486/2129)                       |
++--------------------------+-----------------------------------------+
 * Specify Design Power Budget using, set_operating_conditions -design_power_budget <value in Watts>
 
 
@@ -39,15 +39,15 @@ Table of Contents
 | On-Chip        | Power (W) | Used     | Available | Utilization (%) |
 +----------------+-----------+----------+-----------+-----------------+
 | Clocks         |     0.002 |        3 |       --- |             --- |
-| Slice Logic    |     0.003 |     1676 |       --- |             --- |
+| Slice Logic    |     0.004 |     1676 |       --- |             --- |
 |   LUT as Logic |     0.003 |      829 |     63400 |            1.31 |
 |   CARRY4       |    <0.001 |      180 |     15850 |            1.14 |
 |   Register     |    <0.001 |      427 |    126800 |            0.34 |
 |   Others       |     0.000 |       48 |       --- |             --- |
-| Signals        |     0.003 |     1172 |       --- |             --- |
+| Signals        |     0.004 |     1172 |       --- |             --- |
 | I/O            |    <0.001 |       10 |       210 |            4.76 |
 | Static Power   |     0.091 |          |           |                 |
-| Total          |     0.100 |          |           |                 |
+| Total          |     0.101 |          |           |                 |
 +----------------+-----------+----------+-----------+-----------------+
 
 
@@ -57,7 +57,7 @@ Table of Contents
 +-----------+-------------+-----------+-------------+------------+-------------+-------------+------------+
 | Source    | Voltage (V) | Total (A) | Dynamic (A) | Static (A) | Powerup (A) | Budget (A)  | Margin (A) |
 +-----------+-------------+-----------+-------------+------------+-------------+-------------+------------+
-| Vccint    |       1.000 |     0.024 |       0.009 |      0.015 |       NA    | Unspecified | NA         |
+| Vccint    |       1.000 |     0.025 |       0.010 |      0.015 |       NA    | Unspecified | NA         |
 | Vccaux    |       1.800 |     0.018 |       0.000 |      0.018 |       NA    | Unspecified | NA         |
 | Vcco33    |       3.300 |     0.000 |       0.000 |      0.000 |       NA    | Unspecified | NA         |
 | Vcco25    |       2.500 |     0.000 |       0.000 |      0.000 |       NA    | Unspecified | NA         |
@@ -123,10 +123,16 @@ Table of Contents
 3.1 By Hierarchy
 ----------------
 
-+---------------------+-----------+
-| Name                | Power (W) |
-+---------------------+-----------+
-| power_bench_wrapper |     0.009 |
-|   core              |     0.008 |
-|     u_sa            |     0.007 |
-+---------------------+-----------+
++--------------------------+-----------+
+| Name                     | Power (W) |
++--------------------------+-----------+
+| power_bench_wrapper      |     0.010 |
+|   core                   |     0.009 |
+|     u_sa                 |     0.008 |
+|       row[1].col[0].u_pe |     0.001 |
+|       row[3].col[0].u_pe |     0.001 |
++--------------------------+-----------+
+
+
+0 Infos, 1 Warnings, 0 Critical Warnings and 0 Errors encountered.
+report_power completed successfully
