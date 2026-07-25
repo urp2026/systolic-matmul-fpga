@@ -1,7 +1,7 @@
 module power_bench_wrapper #(
     parameter SIZE = 4,
     parameter DW   = 16,
-    parameter AW   = 40
+    parameter AW   = 64
 )(
     input  wire       CLK100MHZ,
     input  wire       rst_btn,
