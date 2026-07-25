@@ -32,7 +32,7 @@ module array_multiplier_signed #(parameter W = 16) (
 endmodule
 
 
-module pe_ws #(parameter DW = 16, parameter AW = 48) (  // DW(Data Width)=16, AW(Accumulator Width)=48로 확장
+module pe_ws #(parameter DW = 16, parameter AW = 64) (
     input wire clk,
     input wire rst,
     input wire load_w,
@@ -65,7 +65,7 @@ module pe_ws #(parameter DW = 16, parameter AW = 48) (  // DW(Data Width)=16, AW
 endmodule
 
 
-module systolic_array_ws #(parameter SIZE = 4, DW = 16, AW = 48) (
+module systolic_array_ws #(parameter SIZE = 4, DW = 16, AW = 64) (
     input wire clk,
     input wire rst,
     input wire load_w,
@@ -100,7 +100,7 @@ module systolic_array_ws #(parameter SIZE = 4, DW = 16, AW = 48) (
 endmodule
 
 
-module matmul_top_ws #(parameter SIZE = 4, DW = 16, AW = 48) (
+module matmul_top_ws #(parameter SIZE = 4, DW = 16, AW = 64) (
     input wire clk,
     input wire rst,
     input wire start,
