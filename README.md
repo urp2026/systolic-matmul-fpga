@@ -123,7 +123,7 @@ Post-Synthesis Functional Simulation은 배선 지연이 0이어서 글리치 �
 | DW | 곱셈기 | LUT | CARRY4 | FF | Slice | WNS | Fmax | Dynamic |
 |---|---|---|---|---|---|---|---|---|
 | 16 | Array | 917 | 180 | 429 | 329 | −0.086 | 99.1 MHz | 12 mW |
-| 16 | Wallace | 829 | 180 | 427 | 276 | +0.244 | 102.5 MHz | 10 mW |
+| 16 | Wallace | 888 | 68 | 426 | 306 | +0.230 | 102.4 MHz | 11 mW |
 | 8 | Array | 781 | 132 | 426 | 285 | +0.476 | 105.0 MHz | 10 mW |
 | 8 | Wallace | 779 | 52 | 426 | 261 | +0.317 | 103.3 MHz | 9 mW |
 | 4 | Array | 479 | 68 | 373 | 171 | +1.599 | 119.0 MHz | 6 mW |
