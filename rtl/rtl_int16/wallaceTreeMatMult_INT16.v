@@ -1,34 +1,39 @@
 (* use_dsp = "no" *)
-module array_multiplier_signed #(parameter W = 16) ( 
-    input wire signed [W-1:0] a,
-    input wire signed [W-1:0] b,
+module array_multiplier_signed #(parameter W = 16) (
+    input  wire signed [W-1:0] a,
+    input  wire signed [W-1:0] b,
     output wire signed [2*W-1:0] p
 );
-    wire signed [2*W-1:0] a_ext = {{W{a[W-1]}}, a};
-    wire signed [2*W-1:0] pp [0:W-1];
-    
+    wire [2*W-1:0] a_ext = {{W{a[W-1]}}, a};
+    wire [2*W-1:0] pp [0:W-1];
 
     genvar i;
     generate
         for (i = 0; i < W-1; i = i + 1) begin : gen_pp
-            assign pp[i] = b[i] ? (a_ext <<< i) : {(2*W){1'b0}};
+            assign pp[i] = b[i] ? (a_ext << i) : {(2*W){1'b0}};
         end
-    
-        assign pp[W-1] = b[W-1] ? (~(a_ext <<< (W-1)) + 1'b1) : {(2*W){1'b0}};
+        assign pp[W-1] = b[W-1] ? (~(a_ext << (W-1)) + 1'b1) : {(2*W){1'b0}};
     endgenerate
 
-    
-    reg signed [2*W-1:0] tree_sum;
-    integer idx;
-    always @(*) begin
-        tree_sum = 0;
-        for (idx = 0; idx < W; idx = idx + 1) begin
-            tree_sum = tree_sum + pp[idx];
-        end
-    end
+    function [2*W-1:0] csa_sum; input [2*W-1:0] x,y,z; csa_sum = x ^ y ^ z;                 endfunction
+    function [2*W-1:0] csa_car; input [2*W-1:0] x,y,z; csa_car = ((x&y)|(y&z)|(z&x)) << 1;  endfunction
 
-    assign p = tree_sum;
+    wire [2*W-1:0] s0 = csa_sum(pp[0],pp[1],pp[2]),     c0 = csa_car(pp[0],pp[1],pp[2]);
+    wire [2*W-1:0] s1 = csa_sum(pp[3],pp[4],pp[5]),     c1 = csa_car(pp[3],pp[4],pp[5]);
+    wire [2*W-1:0] s2 = csa_sum(pp[6],pp[7],pp[8]),     c2 = csa_car(pp[6],pp[7],pp[8]);
+    wire [2*W-1:0] s3 = csa_sum(pp[9],pp[10],pp[11]),   c3 = csa_car(pp[9],pp[10],pp[11]);
+    wire [2*W-1:0] s4 = csa_sum(pp[12],pp[13],pp[14]),  c4 = csa_car(pp[12],pp[13],pp[14]);
+    wire [2*W-1:0] s5 = csa_sum(s0,c0,s1),              c5 = csa_car(s0,c0,s1);
+    wire [2*W-1:0] s6 = csa_sum(c1,s2,c2),              c6 = csa_car(c1,s2,c2);
+    wire [2*W-1:0] s7 = csa_sum(s3,c3,s4),              c7 = csa_car(s3,c3,s4);
+    wire [2*W-1:0] s8 = csa_sum(s5,c5,s6),              c8 = csa_car(s5,c5,s6);
+    wire [2*W-1:0] s9 = csa_sum(c6,s7,c7),              c9 = csa_car(c6,s7,c7);
+    wire [2*W-1:0] s10 = csa_sum(s8,c8,s9),             c10 = csa_car(s8,c8,s9);
+    wire [2*W-1:0] s11 = csa_sum(c9,c4,pp[15]),         c11 = csa_car(c9,c4,pp[15]);
+    wire [2*W-1:0] s12 = csa_sum(s10,c10,s11),          c12 = csa_car(s10,c10,s11);
+    wire [2*W-1:0] s13 = csa_sum(s12,c12,c11),          c13 = csa_car(s12,c12,c11);
 
+    assign p = s13 + c13;
 endmodule
 
 
