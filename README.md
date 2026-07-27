@@ -2,7 +2,7 @@
 
 > **2026 하계 URP (Undergraduate Research Program)**
 > 지도교수 김율화 (성균관대학교 반도체시스템공학과)
-> 배윤재 · 이예준 · 주형능 · 이재현
+> Jaeden Bae · Aiden Lee · Steven Ju · Jaehyeon Lee
 
 ---
 
