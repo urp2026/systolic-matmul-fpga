@@ -2,11 +2,6 @@
 
 **A weight-stationary systolic array for integer matrix multiplication — measuring the real cost of multiplier microarchitecture and data width on FPGA.**
 
-![Platform](https://img.shields.io/badge/platform-Artix--7%20XC7A100T-blue)
-![HDL](https://img.shields.io/badge/HDL-Verilog-orange)
-![Tools](https://img.shields.io/badge/tools-Vivado%202025.2%20%7C%20Icarus-lightgrey)
-![Status](https://img.shields.io/badge/status-complete-brightgreen)
-
 A 4×4 weight-stationary systolic array implemented on a Digilent Nexys A7-100T, built six times over — three integer precisions (INT4 / INT8 / INT16) × two multiplier microarchitectures (array vs. Wallace tree) — and measured end to end for power, performance, area, and numerical accuracy.
 
 ---
