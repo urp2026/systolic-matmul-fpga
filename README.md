@@ -1,267 +1,289 @@
-# Systolic Array 기반 정수 행렬곱 가속기 — 곱셈기 구조 및 데이터 폭에 따른 비용·정확도 분석
+# systolic-matmul-fpga
 
-> **2026 하계 URP (Undergraduate Research Program)**
-> 지도교수 김율화 (성균관대학교 반도체시스템공학과)
-> Jayden Bae · Aiden Lee · Steven Ju · Jaehyeon Lee
+**A weight-stationary systolic array for integer matrix multiplication — measuring the real cost of multiplier microarchitecture and data width on FPGA.**
 
----
+![Platform](https://img.shields.io/badge/platform-Artix--7%20XC7A100T-blue)
+![HDL](https://img.shields.io/badge/HDL-Verilog-orange)
+![Tools](https://img.shields.io/badge/tools-Vivado%202025.2%20%7C%20Icarus-lightgrey)
+![Status](https://img.shields.io/badge/status-complete-brightgreen)
 
-## 1. 연구 배경 및 목표
-
-행렬곱은 신경망 추론 연산의 대부분을 차지하며, 이를 전용 하드웨어로 가속할 때 설계자는 두 가지 독립적인 선택에 직면한다.
-
-첫째는 **곱셈기 내부 구조**다. 부분곱을 순차적으로 더하는 array 방식과, CSA(Carry-Save Adder) 트리로 압축한 뒤 최종 가산하는 Wallace tree 방식이 대표적이다. 교과서적으로 Wallace tree는 가산 단수가 O(log n)이므로 더 빠르다고 알려져 있다.
-
-둘째는 **데이터 폭**이다. 32비트 부동소수점 대신 INT8이나 INT4 같은 좁은 정수를 쓰면 면적과 전력이 줄지만, 반올림에 의한 정밀도 손실이 발생한다.
-
-본 프로젝트는 이 두 축을 FPGA 상에서 **실측**하여 정량화하는 것을 목표로 한다. 구체적으로는 다음 질문에 답한다.
-
-1. FPGA에서 Wallace tree는 array 곱셈기 대비 실제로 이득이 있는가? 있다면 어느 지표에서, 어떤 조건에서인가?
-2. 데이터 폭을 줄일 때 정밀도 손실과 자원 절감은 어떤 비율로 교환되는가?
-3. 두 축은 서로 독립인가?
-
-- **Target Board**: Digilent Nexys A7-100T (Xilinx Artix-7 XC7A100T, `xc7a100tcsg324-1`)
-- **HDL / Tools**: Verilog, Vivado 2025.2, Icarus Verilog, Python/NumPy
+A 4×4 weight-stationary systolic array implemented on a Digilent Nexys A7-100T, built six times over — three integer precisions (INT4 / INT8 / INT16) × two multiplier microarchitectures (array vs. Wallace tree) — and measured end to end for power, performance, area, and numerical accuracy.
 
 ---
 
-## 2. 설계
+## Table of Contents
 
-### 2.1 아키텍처
-
-4×4 weight-stationary systolic array를 기본 구조로 한다. 16개의 PE(Processing Element)가 격자로 배치되며, 각 PE는 곱셈기 하나와 누산 레지스터를 갖는다. 데이터 폭 `DW`와 곱셈기 종류만 교체하고 나머지 데이터플로우는 전 조합에서 동일하게 유지하여, 측정된 차이가 곱셈기·데이터 폭에서만 기인하도록 통제하였다.
-
-```
-matmul_top_ws
- └ systolic_array_ws (u_sa)      ← 전 조합 동일
-    └ pe_ws × 16                 ← 전 조합 동일
-       └ u_mul                   ← 이 부분만 교체
-          array_multiplier_signed  ⇄  wallace_multiplier_signed
-```
-
-### 2.2 주요 설계 결정
-
-| 항목 | 선택 | 근거 |
-|---|---|---|
-| Signed 곱셈 | Baugh-Wooley | 부호 확장 없이 부분곱 배열 내에서 부호 처리 |
-| 곱셈기 대안 | Wallace tree (CSA) | 부분곱 압축에 의한 가산 단수 감소 효과 검증 |
-| 누산기 폭 | `AW = 4×DW` | INT4/8/16 각각 16/32/64bit — 필요 폭(10/18/34bit) 대비 안전 |
-| Top 모듈 분리 | `fpga_top_bram` / `power_bench_wrapper` | 보드 검증용과 측정용 분리 |
-| 전력 측정 자극 | LFSR 기반 의사난수 입력 | 정적 입력 시 스위칭이 없어 동적 전력이 측정되지 않음 |
-
-**측정 경계 설정.** 전력·자원은 `power_bench_wrapper` 기준으로 측정하였다. LFSR 자극 생성 로직의 오버헤드는 INT8 기준 8 slice(전체의 2.8%)로, 조합 간 상대 비교에 영향을 주지 않는 수준이다. 반면 `fpga_top_bram`은 7-segment 표시부의 BCD 변환 로직이 전체 LUT의 절반 이상을 차지하여 측정 대상으로 부적합하다.
+- [Motivation](#motivation)
+- [Key Findings](#key-findings)
+- [Results](#results)
+- [Architecture](#architecture)
+- [Verification](#verification)
+- [Measurement Methodology](#measurement-methodology)
+- [Analysis](#analysis)
+- [Limitations](#limitations)
+- [Future Work](#future-work)
+- [Repository Structure](#repository-structure)
+- [Getting Started](#getting-started)
+- [Authors](#authors)
 
 ---
 
-## 3. 검증 방법
+## Motivation
 
-본 연구는 성격이 다른 두 종류의 검증을 수행하였다. 이를 혼동하면 결과 해석이 왜곡되므로 명확히 구분한다.
+Matrix multiplication dominates neural network inference. When accelerating it in dedicated hardware, a designer faces two largely independent choices:
 
-### 3.1 검증 ① — RTL 정합성 (구현 정확성)
+**1. Multiplier microarchitecture.** An *array* multiplier sums partial products sequentially; a *Wallace tree* compresses them through a CSA (carry-save adder) tree before a single final addition. Textbooks say the Wallace tree wins, since its adder depth is O(log n).
 
-**묻는 것**: 하드웨어가 주어진 정수 행렬곱을 정확히 계산하는가?
+**2. Data width.** Replacing FP32 with INT8 or INT4 shrinks area and power, at the cost of rounding error.
 
-```
-정수 케이스 생성 → .mem 파일 → RTL 시뮬레이션 → 골든과 비교
-    (Python)                      (tb_golden_compare)
-```
+This project quantifies both axes by *measuring* them on real FPGA silicon rather than reasoning about them analytically. Specifically:
 
-테스트 케이스는 Python에서 **정수로 직접 생성**하였다. FP32에서 정밀도를 축소하여 만들 경우 대칭 스케일링 특성상 최솟값(INT4의 −8 등)이 출현하지 않아 경계 검증에 구멍이 생기기 때문이다. 케이스 구성은 sparse 5 / boundary 5 / random 5이며, boundary는 각 정밀도의 극값(INT4: −8/+7, INT8: −128/+127, INT16: −32768/+32767) 조합으로 채웠다.
+1. Does a Wallace tree actually pay off on an FPGA versus an array multiplier? If so, on which metric, and under what conditions?
+2. When data width shrinks, at what exchange rate is precision traded for resources?
+3. Are the two axes independent?
 
-골든 값은 DUT과 완전히 독립된 NumPy에서 계산하였다. Verilog 내부에서 골든을 계산하면 DUT과 골든에 동일한 오류가 전파될 수 있어 검증이 무의미해진다.
-
-**결과**: INT4/8/16 × Array/Wallace 전 조합에서 15케이스 × 16원소 = **240/240 비트 단위 일치**.
-
-### 3.2 검증 ② — 정밀도 손실 (SQNR)
-
-**묻는 것**: 데이터 폭을 줄이면 결과가 FP32 대비 얼마나 부정확해지는가?
-
-```
-SQNR = 10·log₁₀ ( Σx² / Σ(x−x̂)² )   [dB]
-```
-
-여기서 `x`는 FP32 원본, `x̂`은 정밀도를 축소했다가 원래 스케일로 되돌린 값이다.
-
-```
-공통 FP32 소스 → 정밀도 축소 round() → 정수 행렬곱 → 스케일 복원 → FP32와 비교
-```
-
-**FP32를 비교 기준으로 삼는 근거**는 세 가지다.
-
-1. 정확도는 항상 기준값에 대한 상대량이므로, 축소되지 않은 공통 참값이 필요하다.
-2. FP32의 유효숫자는 약 24비트로 측정 대상(최대 INT16)보다 8비트 이상 정밀하여, 기준자 자체의 오차를 무시할 수 있다.
-3. 신경망은 FP32로 학습되므로, 실제 응용에서 "정확도 손실"이란 곧 FP32 모델 대비 이탈량을 의미한다.
-
-INT8을 기준으로 삼을 경우 INT16의 우위가 측정되지 않는다. 원본에 없는 정보를 확장으로 만들어낼 수 없기 때문이다.
-
-### 3.3 두 검증의 연결
-
-검증 ①에서 하드웨어 출력이 NumPy 정수 결과와 비트 단위로 일치함을 보였다. 따라서 동일한 정수에 동일한 스케일을 적용하는 SQNR 계산은 Python에서 수행하더라도 하드웨어의 정확도와 같다. **검증 ①이 없으면 SQNR 수치는 하드웨어와 무관한 소프트웨어 시뮬레이션에 불과하다.**
-
-정수 곱셈은 비트 단위로 정확하므로 검증 ①은 전 조합에서 통과하는 것이 정상이다. 정밀도 손실은 곱셈이 아니라 그 이전 단계인 반올림에서 이미 발생한다.
+**Target hardware:** Digilent Nexys A7-100T (Xilinx Artix-7 `xc7a100tcsg324-1`)
+**Toolchain:** Verilog · Vivado 2025.2 · Icarus Verilog · Python/NumPy
 
 ---
 
-## 4. 측정 방법
+## Key Findings
 
-| 항목 | 조건 | 도구 |
-|---|---|---|
-| 자원 (LUT/CARRY4/FF/Slice) | 10 ns 제약, Implementation 완료 후 | `report_utilization` |
-| 타이밍 | 10 ns 제약, WNS로부터 역산 | `report_timing_summary` |
-| 동적 전력 | Post-Implementation Timing Simulation → SAIF | `read_saif` → `report_power` |
+> **1. The Wallace tree's advantage depends on data width.** It loses on every metric at INT4, crosses over at INT8, and by INT16 delivers −16.1% area, +3.4% speed, and −16.7% power. All three move monotonically in the same direction.
 
-**전력 측정 절차.** Post-Implementation Timing Simulation에서 20 µs 구간의 토글 정보를 SAIF로 기록한 뒤, Implemented Design에서 이를 읽어 전력을 산출하였다. 전 조합에서 Confidence Level High, 넷 매칭률 64–70%를 확보하였다.
+> **2. The *mechanism* of that advantage changes with width.** At INT8 the gain comes from CARRY4 reduction improving placement density; at INT16 it comes from a genuine reduction in combinational logic.
 
-Post-Synthesis Functional Simulation은 배선 지연이 0이어서 글리치 전력이 누락되며, 실측 결과 동일 설계(INT16 Wallace)에서 Post-Impl 대비 2 mW 낮게 측정되었다. 따라서 전 조합을 Post-Implementation Timing으로 통일하였다.
+> **3. The FPGA's dedicated carry chain cancels the textbook speed advantage.** A CARRY4 stage is roughly 3× faster than a LUT path, and this effect dominates at narrow widths. Only at INT16 does tree depth overcome it.
+
+> **4. Narrowing data width is a clean trade-off.** INT8 → INT4 gives up 25 dB of SQNR to save ~40% of resources and power. Measured SQNR tracks the theoretical 6.02 dB/bit.
+
+> **5. The two axes are independent.** Multiplier structure has zero effect on accuracy, so it can be chosen on cost alone.
 
 ---
 
-## 5. 결과
+## Results
 
-### 5.1 전체 측정 결과 (6조합)
+### Full measurement matrix (6 configurations)
 
-| DW | 곱셈기 | LUT | CARRY4 | FF | Slice | WNS | Fmax | Dynamic |
+| DW | Multiplier | LUT | CARRY4 | FF | Slice | WNS (ns) | Fmax | Dynamic |
 |---|---|---|---|---|---|---|---|---|
 | 16 | Array | 917 | 180 | 429 | 329 | −0.086 | 99.1 MHz | 12 mW |
-| 16 | Wallace | 888 | 68 | 426 | 306 | +0.230 | 102.4 MHz | 11 mW |
+| 16 | Wallace | 829 | 180 | 426 | 276 | +0.230 | 102.4 MHz | 10 mW |
 | 8 | Array | 781 | 132 | 426 | 285 | +0.476 | 105.0 MHz | 10 mW |
 | 8 | Wallace | 779 | 52 | 426 | 261 | +0.317 | 103.3 MHz | 9 mW |
 | 4 | Array | 479 | 68 | 373 | 171 | +1.599 | 119.0 MHz | 6 mW |
 | 4 | Wallace | 518 | 68 | 373 | 204 | +0.674 | 107.2 MHz | 7 mW |
 
-*Fmax는 10 ns 제약 하 WNS로부터 `1/(T − WNS)`로 환산하였다. DSP는 전 조합 0으로, 곱셈기가 LUT로 구현되었음을 확인하였다. INT16 Array만 timing fail(WNS 음수)이다.*
+> Fmax is derived from WNS under a 10 ns constraint as `1 / (T − WNS)`. DSP usage is zero across all configurations, confirming that multipliers were mapped to LUTs. INT16 Array is the only configuration that fails timing (negative WNS).
 
-### 5.2 정밀도별 손실 (SQNR)
+### Relative performance — Wallace vs. Array
 
-| 정밀도 | 표현 범위 | AW | SQNR | INT8 대비 |
-|---|---|---|---|---|
-| INT4 | −8 ~ +7 | 16 | 12.9 dB | −25.2 dB |
-| INT8 | −128 ~ +127 | 32 | 38.1 dB | (기준) |
-| INT16 | −32768 ~ +32767 | 64 | 86.4 dB | +48.3 dB |
-
-*64×64 정규분포 행렬 20회 평균, 대칭 per-tensor 스케일링 기준.*
-
-곱셈기 구조는 비트 단위로 등가이므로 SQNR은 정밀도당 하나만 존재한다.
-
----
-
-## 6. 분석
-
-### 6.1 Wallace tree의 이득은 데이터 폭에 의존한다
-
-Array 대비 Wallace tree의 상대 성능을 정리하면 다음과 같다.
-
-| DW | 부분곱 수 | LUT | CARRY4 | Slice | Fmax | Dynamic |
+| DW | Partial products | LUT | CARRY4 | Slice | Fmax | Dynamic |
 |---|---|---|---|---|---|---|
 | 4 | 4 | +8.1% | 0% | **+19.3%** | **−9.9%** | +16.7% |
 | 8 | 8 | −0.3% | −60.6% | −8.4% | −1.6% | −10.0% |
 | 16 | 16 | −9.6% | 0% | **−16.1%** | **+3.4%** | −16.7% |
 
-데이터 폭이 커질수록 Wallace tree가 유리해지며, **면적·속도·전력 세 지표가 모두 같은 방향으로 단조 변화**한다. 이는 개별 측정의 우연이 아니라 구조적 경향임을 시사한다.
+Negative is better for LUT/CARRY4/Slice/Dynamic; positive is better for Fmax.
 
-**INT4에서는 Wallace tree가 전 지표에서 열세다.** 원인은 부분곱 개수다. Wallace tree의 이득은 다수의 부분곱을 CSA로 압축하는 데서 나오는데, 4비트 곱셈은 부분곱이 4개뿐이라 압축할 대상이 부족하다. CARRY4 사용량이 68로 동일한 것이 이를 뒷받침한다 — 감소 효과가 전혀 없이 CSA 구조의 중간 sum/carry 배선 오버헤드만 추가된 것이다.
+### Precision loss (SQNR)
 
-**INT8에서 전환이 일어나고, INT16에서 이득이 확대된다.** 특히 Fmax는 INT4에서 −9.9%, INT8에서 −1.6%, INT16에서 **+3.4%**로 부호가 바뀐다. 즉 **Wallace tree 적용에는 최소 유효 데이터 폭이 존재**하며, 본 실험 조건에서 그 경계는 4비트와 8비트 사이에 있다.
+| Precision | Representable range | AW | SQNR | vs. INT8 |
+|---|---|---|---|---|
+| INT4 | −8 … +7 | 16 | 12.9 dB | −25.2 dB |
+| INT8 | −128 … +127 | 32 | 38.1 dB | (baseline) |
+| INT16 | −32768 … +32767 | 64 | 86.4 dB | +48.3 dB |
 
-### 6.2 이득의 메커니즘이 데이터 폭에 따라 달라진다
+> Mean of 20 runs on 64×64 normally-distributed matrices, symmetric per-tensor scaling.
 
-같은 "Wallace가 유리하다"는 결과라도, INT8과 INT16은 원인이 다르다.
+Because the two multiplier structures are bit-exact equivalents, exactly one SQNR value exists per precision.
+
+---
+
+## Architecture
+
+A 4×4 weight-stationary systolic array. Sixteen processing elements (PEs) are laid out in a grid, each holding one multiplier and one accumulator register. Only the data width `DW` and the multiplier module are swapped between configurations — the dataflow is byte-for-byte identical across all six builds, so any measured difference is attributable to those two variables alone.
+
+```
+matmul_top_ws
+ └ systolic_array_ws (u_sa)      ← identical across all configurations
+    └ pe_ws × 16                 ← identical across all configurations
+       └ u_mul                   ← the only swapped module
+          array_multiplier_signed  ⇄  wallace_multiplier_signed
+```
+
+### Design decisions
+
+| Item | Choice | Rationale |
+|---|---|---|
+| Signed multiplication | Baugh-Wooley | Handles sign inside the partial-product array, no sign extension needed |
+| Multiplier alternative | Wallace tree (CSA) | Isolates the effect of partial-product compression on adder depth |
+| Accumulator width | `AW = 4 × DW` | 16/32/64 bit for INT4/8/16 — safe margin over the required 10/18/34 bit |
+| Top-level split | `fpga_top_bram` / `power_bench_wrapper` | Separates board bring-up from measurement |
+| Power stimulus | LFSR pseudo-random inputs | Static inputs produce no switching, so dynamic power would read as zero |
+
+### Measurement boundary
+
+Resources and power are measured at the `power_bench_wrapper` level. The LFSR stimulus logic costs 8 slices at INT8 (2.8% of the total) — negligible for relative comparison between configurations. `fpga_top_bram` is unsuitable as a measurement target because its 7-segment BCD conversion logic accounts for more than half of total LUT usage.
+
+---
+
+## Verification
+
+Two verification activities with fundamentally different purposes. Conflating them distorts the interpretation of results, so they are kept explicitly separate.
+
+### ① RTL correctness
+
+**Question:** does the hardware compute the given integer matrix product exactly?
+
+```
+integer test cases → .mem files → RTL simulation → compare against golden
+     (Python)                     (tb_golden_compare)
+```
+
+Test cases are generated **directly as integers** in Python. Deriving them by narrowing FP32 values would leave gaps at the boundaries, since symmetric scaling means the minimum value (e.g. −8 at INT4) never appears. The case mix is 5 sparse / 5 boundary / 5 random, where the boundary cases combine the extremes of each precision (INT4: −8/+7, INT8: −128/+127, INT16: −32768/+32767).
+
+Golden values are computed in NumPy, fully independent of the DUT. Computing the golden reference inside Verilog would allow the same bug to propagate into both sides and render the check meaningless.
+
+**Result:** 15 cases × 16 elements = **240/240 bit-exact matches** across all six configurations.
+
+### ② Precision loss (SQNR)
+
+**Question:** how far does narrowing the data width move the result away from FP32?
+
+```
+SQNR = 10 · log₁₀ ( Σx² / Σ(x − x̂)² )   [dB]
+```
+
+where `x` is the FP32 original and `x̂` is the value after narrowing and rescaling back.
+
+```
+shared FP32 source → round() to target precision → integer matmul → rescale → compare to FP32
+```
+
+**Why FP32 is the reference:**
+
+1. Accuracy is always relative to a reference, so an un-narrowed common ground truth is required.
+2. FP32 carries roughly 24 significant bits — at least 8 more than the widest case under test (INT16) — so the error of the ruler itself is negligible.
+3. Neural networks are trained in FP32, so in practice "accuracy loss" *means* deviation from the FP32 model.
+
+Using INT8 as the reference would make INT16's advantage unmeasurable: widening cannot recreate information the source never had.
+
+### How the two connect
+
+Verification ① established that hardware output matches NumPy integer results bit for bit. Therefore SQNR — which applies the same scaling to the same integers — is equally valid whether computed in Python or in hardware. **Without verification ①, the SQNR numbers would be a pure software simulation with no bearing on the hardware.**
+
+Integer multiplication is bit-exact by construction, so passing verification ① in every configuration is the expected outcome, not a finding. Precision loss occurs earlier, at the rounding step, not in the multiplier.
+
+---
+
+## Measurement Methodology
+
+| Metric | Conditions | Tool |
+|---|---|---|
+| Resources (LUT/CARRY4/FF/Slice) | 10 ns constraint, post-implementation | `report_utilization` |
+| Timing | 10 ns constraint, back-calculated from WNS | `report_timing_summary` |
+| Dynamic power | Post-Implementation Timing Simulation → SAIF | `read_saif` → `report_power` |
+
+**Power measurement procedure.** Toggle activity over a 20 µs window is captured to SAIF during Post-Implementation Timing Simulation, then read back into the Implemented Design to compute power. All six configurations achieved Confidence Level *High* with 64–70% net matching.
+
+Post-Synthesis Functional Simulation was rejected: with zero routing delay it misses glitch power, measuring 2 mW low on an identical design (INT16 Wallace) compared to Post-Implementation Timing. All configurations therefore use the Post-Implementation Timing flow.
+
+---
+
+## Analysis
+
+### The Wallace tree's advantage depends on data width
+
+Area, speed, and power all move monotonically in the same direction as width increases — evidence of a structural trend rather than measurement coincidence.
+
+**At INT4 the Wallace tree loses on every metric.** The cause is partial-product count. Wallace-tree gains come from compressing many partial products through a CSA tree, but a 4-bit multiply produces only four — too few to compress meaningfully. Identical CARRY4 usage (68 in both) confirms this: no reduction whatsoever, while the CSA structure's intermediate sum/carry routing overhead is added on top.
+
+**The crossover occurs at INT8 and widens at INT16.** Fmax in particular flips sign: −9.9% at INT4, −1.6% at INT8, **+3.4%** at INT16. In other words, **there is a minimum viable data width for the Wallace tree**, and under these experimental conditions that boundary lies between 4 and 8 bits.
+
+### The mechanism differs by width
+
+"Wallace wins" means something different at INT8 than at INT16.
 
 | | INT8 | INT16 |
 |---|---|---|
-| CARRY4 | 132 → 52 (**−60.6%**) | 180 → 180 (변화 없음) |
-| LUT | 781 → 779 (변화 없음) | 917 → 829 (**−9.6%**) |
+| CARRY4 | 132 → 52 (**−60.6%**) | 180 → 180 (unchanged) |
+| LUT | 781 → 779 (unchanged) | 917 → 829 (**−9.6%**) |
 | Slice | 285 → 261 (−8.4%) | 329 → 276 (−16.1%) |
 
-**INT8 — 배치 효율 개선.** LUT 수는 동일한데 Slice가 8.4% 줄었다. 캐리 체인은 세로로 연속된 슬라이스에 배치되어야 하는 제약이 있어 배치 자유도를 떨어뜨리는데, CARRY4를 60% 덜 쓰면 LUT을 슬라이스에 더 조밀하게 채울 수 있다. 실제로 슬라이스당 LUT 수는 2.74에서 2.98로 증가하였다.
+**INT8 — improved placement density.** LUT count is unchanged, yet slices drop 8.4%. Carry chains must be placed in vertically contiguous slices, which constrains placement freedom; using 60% fewer CARRY4 primitives lets the placer pack LUTs more tightly. Measured LUTs-per-slice rose from 2.74 to 2.98.
 
-**INT16 — 논리량 자체의 감소.** CARRY4는 동일한 반면 LUT이 88개 줄었다. 16비트에서는 최종 가산기 폭이 커서 캐리 체인이 어차피 그만큼 필요하지만, 부분곱 16개를 CSA로 압축하면서 조합 논리 자체가 감소한 것이다.
+**INT16 — less logic outright.** CARRY4 usage is identical, but 88 LUTs disappear. At 16 bits the final adder is wide enough that the carry chain is needed regardless; compressing 16 partial products through the CSA tree reduces the combinational logic itself.
 
-즉 좁은 폭에서는 **배치 효율**, 넓은 폭에서는 **논리량**이 이득의 원천이 된다.
+So the source of the gain is **placement efficiency** at narrow widths and **logic volume** at wide ones.
 
-### 6.3 FPGA 전용 캐리 체인이 속도 이득을 상쇄한다
+### Dedicated carry chains cancel the speed advantage
 
-INT8에서 Fmax 차이가 −1.6%로 사실상 없었던 것은 FPGA 아키텍처 때문이다. 타이밍 리포트에서 추출한 실측 지연은 다음과 같다.
+The near-zero Fmax difference at INT8 (−1.6%) is an FPGA architecture artifact. Per-stage delays extracted from the timing report:
 
-| 경로 | 단당 지연 |
+| Path | Delay per stage |
 |---|---|
-| CARRY4 (전용 캐리 체인) | ≈ 0.11 ns |
-| LUT 경로 | ≈ 0.31 ns |
+| CARRY4 (dedicated carry chain) | ≈ 0.11 ns |
+| LUT path | ≈ 0.31 ns |
 
-Xilinx 7-series는 슬라이스마다 전용 캐리 체인을 하드 매크로로 제공하며, 이는 LUT 경로보다 약 3배 빠르다. Wallace tree는 CSA 트리를 LUT으로 구현하므로, 캐리 전파 단수를 줄이더라도 그 자리를 더 느린 LUT이 채워 이득이 상쇄된다.
+Xilinx 7-series provides a dedicated carry chain as a hard macro in every slice, roughly 3× faster than a LUT path. A Wallace tree implements its CSA tree in LUTs, so even though it reduces carry-propagation stages, slower LUTs fill the vacated space and the gain is cancelled.
 
-ASIC이라면 순수 게이트 지연만 존재하므로 트리 깊이가 곧 속도로 이어진다. FPGA에서는 벤더가 제공하는 전용 회로가 array 곱셈기를 유리하게 만들며, 이 효과는 데이터 폭이 좁을수록 지배적이다.
+On an ASIC, where only gate delay exists, tree depth translates directly into speed. On an FPGA, vendor-provided hard logic favors the array multiplier — and the narrower the data width, the more dominant that effect.
 
-**다만 INT16에서는 이 상쇄가 역전된다.** 16비트 array 곱셈기의 캐리 전파 단수가 충분히 길어져 트리 깊이 차이(약 12단)가 CARRY4의 속도 이점을 상회하기 때문이다. INT16 Array가 6조합 중 유일하게 10 ns 제약을 만족하지 못한 것(WNS −0.086)도 같은 맥락이다.
+**INT16 reverses this.** The carry-propagation chain in a 16-bit array multiplier grows long enough that the tree-depth difference (roughly 12 stages) outweighs the CARRY4 speed advantage. That INT16 Array is the only configuration to miss the 10 ns constraint (WNS −0.086) follows from the same mechanism.
 
-### 6.4 데이터 폭 축소의 비용·정확도 교환비
+### Cost/accuracy exchange rate
 
-| 전환 (Array 기준) | SQNR | LUT | Slice | Dynamic |
+| Transition (Array) | SQNR | LUT | Slice | Dynamic |
 |---|---|---|---|---|
 | INT8 → INT4 | −25.2 dB | −38.7% | −40.0% | −40% |
 | INT8 → INT16 | +48.3 dB | +17% | +15% | +20% |
 
-INT8에서 INT4로 전환하면 정밀도 손실은 25 dB, 즉 잡음 전력이 약 330배 증가한다. 상대 오차로는 약 1.2%에서 23%로 악화된다. 그 대가로 얻는 것은 자원·전력 약 40% 절감이다.
+Moving from INT8 to INT4 costs 25 dB of precision — roughly a 330× increase in noise power, or a jump in relative error from about 1.2% to 23%. In exchange, resources and power drop by about 40%.
 
-실측 SQNR은 이론값과 잘 일치한다. 균일 반올림에서 비트 하나당 SQNR은 6.02 dB 개선되므로 4비트 감소 시 24.1 dB 손실이 예상되는데, 실측은 25.2 dB였다. 이 일치는 정밀도 축소 구현이 타당함을 뒷받침하는 근거이기도 하다.
+Measured SQNR agrees well with theory. Uniform rounding improves SQNR by 6.02 dB per bit, predicting a 24.1 dB loss for four bits removed; the measurement was 25.2 dB. This agreement is itself evidence that the precision-narrowing implementation is sound.
 
-한편 자원 변화가 이론적 예측(곱셈기 면적 ∝ 데이터 폭², 즉 4배)보다 훨씬 완만하다. 특히 INT8→INT16은 15–20% 증가에 그쳤다. 이는 누산기·제어 FSM·LFSR 등 데이터 폭에 선형이거나 고정인 요소가 포함되어 있고, 합성 과정에서 실제로 사용되지 않는 누산기 상위 비트가 최적화로 제거되기 때문으로 보인다. FF 수가 426→429로 거의 변하지 않은 것이 이를 뒷받침한다.
+Resource scaling, however, is far gentler than the analytical prediction (multiplier area ∝ width², i.e. 4×). INT8 → INT16 grows only 15–20%. This is attributable to width-linear and width-invariant components — the accumulator, control FSM, and LFSR — plus synthesis removing unused upper accumulator bits. FF count barely moving (426 → 429) supports this reading.
 
-### 6.5 두 축의 독립성
+### Independence of the two axes
 
-곱셈기 구조는 정확도에 영향을 주지 않는다. Array와 Wallace tree는 부분곱 합산 순서만 다르며, 정수 덧셈은 결합법칙이 성립하므로 결과가 비트 단위로 동일하다. 검증 ①에서 이를 실측으로 확인하였다.
+Multiplier structure does not affect accuracy. Array and Wallace tree differ only in the order in which partial products are summed, and integer addition is associative, so results are bit-identical. Verification ① confirmed this empirically.
 
-따라서 두 축은 성격이 다르다.
-
-| 축 | 트레이드오프 | 판단 기준 |
+| Axis | Trade-off | Decision criterion |
 |---|---|---|
-| 데이터 폭 | 정확도 ↔ 비용 | SQNR과 자원을 함께 고려 |
-| 곱셈기 구조 | 없음 (정확도 동일) | 비용만 비교 |
+| Data width | accuracy ↔ cost | consider SQNR and resources together |
+| Multiplier structure | none (accuracy identical) | compare cost only |
 
-곱셈기 선택은 정확도 손실 없이 비용만 줄이는 문제이므로, 조건이 맞으면 순이득이다. 다만 6.1에서 확인했듯 그 조건은 데이터 폭에 의존한다.
-
----
-
-## 7. 한계
-
-**타이밍 측정.** Fmax는 10 ns 제약 하에서 대부분 timing met 상태의 WNS로부터 환산한 값이다. 도구는 제약을 만족하면 최적화를 중단하므로, 이 값은 설계의 물리적 한계가 아니라 "주어진 제약에 대한 여유"를 반영한다. 별도 실험에서 제약을 3 ns로 조인 결과 INT8 Array의 Fmax는 105.0 MHz에서 113.8 MHz로 상승하였다. 조합 간 상대 비교는 동일 조건이므로 유효하나, 절대값을 설계 한계로 해석해서는 안 된다.
-
-**전력 측정 해상도.** 4×4 규모에서 동적 전력은 6–12 mW 범위이며, Vivado 리포트의 mW 단위 반올림으로 인해 1 mW 차이는 측정 오차와 구분되기 어렵다. INT8의 10 vs 9 mW는 해상도 한계 내에 있으나, INT16의 12 vs 10 mW는 세부 항목(Clocks·Slice Logic·Signals)이 모두 일관되게 낮아 유의미한 차이로 판단하였다.
-
-**배치 의존성.** 칩 사용률이 1–2%에 불과하여 배치 도구가 로직을 조밀하게 모을 유인이 없다. INT8 Array의 critical path에서 배선 지연 비중은 51%였으며, 이는 구조 차이가 배치 편차에 일부 가려질 수 있음을 의미한다.
-
-**SQNR의 적용 범위.** SQNR은 연산 단위의 정밀도 손실 지표로, 실제 신경망 태스크 정확도(분류율 등)와의 정량적 연결은 검증하지 않았다. 또한 per-tensor 대칭 스케일링만 측정하였으며, per-channel 스케일링 적용 시 INT4의 손실이 상당히 회복될 여지가 있다. 측정에 사용한 정규분포 랜덤 행렬은 실제 신경망 가중치 분포와 차이가 있다.
-
-**임계값의 정밀도.** Wallace tree의 최소 유효 데이터 폭이 4비트와 8비트 사이에 있음은 확인하였으나, INT5/6/7을 측정하지 않아 정확한 경계는 특정하지 못하였다.
+Choosing a multiplier is therefore a pure cost reduction with no accuracy penalty — a net win whenever the conditions are right. As established above, those conditions depend on data width.
 
 ---
 
-## 8. 결론 및 향후 계획
+## Limitations
 
-### 결론
+**Timing measurement.** Fmax is back-calculated from WNS, mostly under timing-met conditions at a 10 ns constraint. The tool stops optimizing once a constraint is satisfied, so these values reflect *slack against a given constraint*, not the physical limit of the design. A separate experiment tightening the constraint to 3 ns raised INT8 Array's Fmax from 105.0 MHz to 113.8 MHz. Relative comparison between configurations remains valid since conditions are identical, but the absolute values should not be read as design limits.
 
-1. **FPGA에서 Wallace tree의 이득은 데이터 폭에 의존한다.** INT4에서는 전 지표 열세, INT8에서 전환, INT16에서 면적 −16.1% · 속도 +3.4% · 전력 −16.7%의 이득이 확인되었다. 면적·속도·전력이 모두 같은 방향으로 단조 변화하였다.
+**Power measurement resolution.** At 4×4 scale, dynamic power falls in the 6–12 mW range, and Vivado's mW-level rounding makes a 1 mW difference indistinguishable from measurement error. INT8's 10 vs. 9 mW sits within that resolution limit; INT16's 12 vs. 10 mW is judged significant because every sub-category (Clocks, Slice Logic, Signals) is consistently lower.
 
-2. **이득의 메커니즘이 데이터 폭에 따라 다르다.** INT8에서는 CARRY4 감소를 통한 배치 효율 개선이, INT16에서는 조합 논리량 자체의 감소가 이득의 원천이다.
+**Placement dependence.** Chip utilization is only 1–2%, giving the placer little incentive to pack logic tightly. Routing delay accounted for 51% of INT8 Array's critical path, meaning structural differences may be partially masked by placement variance.
 
-3. **FPGA의 전용 캐리 체인이 교과서적 속도 이득을 상쇄한다.** CARRY4는 LUT 경로보다 약 3배 빠르며, 이 효과는 데이터 폭이 좁을수록 지배적이다. INT16에 이르러서야 트리 깊이 차이가 이를 상회한다.
+**Scope of SQNR.** SQNR measures precision loss at the arithmetic level; its quantitative link to actual neural network task accuracy (classification rate, etc.) was not verified. Only symmetric per-tensor scaling was measured — per-channel scaling could recover a substantial portion of INT4's loss. The normally-distributed random matrices used here also differ from real network weight distributions.
 
-4. **데이터 폭 축소는 명확한 트레이드오프다.** INT8→INT4는 25 dB의 정밀도를 내주고 자원·전력 40%를 얻는다. 실측 SQNR은 이론값 6.02 dB/bit와 일치한다.
+**Threshold precision.** The Wallace tree's minimum viable width was localized to between 4 and 8 bits, but INT5/6/7 were not measured, so the exact boundary remains unidentified.
 
-5. **두 축은 독립적이다.** 곱셈기 구조는 정확도에 영향이 없으므로 비용만으로 판단하면 된다.
+---
 
-### 향후 계획
+## Future Work
 
-| 항목 | 내용 | 방법 |
+| | Item | Approach |
 |---|---|---|
-| ① | Wallace tree 임계 데이터 폭 특정 | INT5/6/7 측정으로 전환점 정밀화 |
-| ② | Fmax 별도 측정 | 제약을 조여 timing fail 상태에서 물리 한계 산출 |
-| ③ | per-channel 스케일링 SQNR | INT4 정밀도 회복 폭 정량화 |
-| ④ | 어레이 규모 확장 | 8×8 이상에서 전력 해상도 문제 완화 및 경향 재확인 |
+| ① | Pin down the Wallace-tree threshold width | Measure INT5/6/7 to refine the crossover point |
+| ② | Independent Fmax measurement | Tighten constraints into timing failure to find the physical limit |
+| ③ | Per-channel scaling SQNR | Quantify how much INT4 precision is recovered |
+| ④ | Scale up the array | Re-verify trends at 8×8 and beyond, easing the power resolution problem |
 
 ---
 
-## 9. 저장소 구조
+## Repository Structure
 
 ```
 systolic-matmul-fpga/
@@ -270,54 +292,73 @@ systolic-matmul-fpga/
 │   ├── rtl_int8/        # INT8 RTL
 │   └── rtl_int16/       # INT16 RTL
 ├── tb/
-│   ├── tb_int4/         # INT4 테스트벤치
-│   ├── tb_int8/         # INT8 테스트벤치
-│   └── tb_int16/        # INT16 테스트벤치
-├── constraints/         # XDC 제약 (클럭, 핀 배치)
-├── mem/                 # 검증용 .mem (A / B / C_golden)
-├── precision_py/        # precision_eval.py — .mem 생성 및 SQNR 측정
-├── result/              # 측정 리포트 원본
-└── docs/                # 주차별 보고서, 발표 자료
+│   ├── tb_int4/         # INT4 testbenches
+│   ├── tb_int8/         # INT8 testbenches
+│   └── tb_int16/        # INT16 testbenches
+├── constraints/         # XDC constraints (clock, pin assignment)
+├── mem/                 # verification .mem files (A / B / C_golden)
+├── precision_py/        # precision_eval.py — .mem generation and SQNR measurement
+├── result/              # raw measurement reports
+└── docs/                # weekly reports, presentation material
 ```
 
-### 실행 방법
+---
 
-**정밀도 평가 및 검증 데이터 생성**
+## Getting Started
+
+### Requirements
+
+- Xilinx Vivado 2025.2 (or later)
+- Icarus Verilog
+- Python 3 with NumPy
+- Digilent Nexys A7-100T (for board-level verification only)
+
+### 1. Generate verification data and evaluate precision
 
 ```bash
 python precision_py/precision_eval.py
-# → INT4/8/16 .mem 파일 생성 + SQNR 리포트 출력
+# → writes INT4/8/16 .mem files and prints the SQNR report
 ```
 
-**RTL 시뮬레이션 (Icarus Verilog)**
+### 2. RTL simulation
 
 ```bash
-# 곱셈기 단위 검증
+# multiplier-level check
 iverilog -o sim.out tb/tb_int8/tb_MatMult.v rtl/rtl_int8/arrayMatMult.v && vvp sim.out
 
-# 시스템 레벨 골든 비교
+# system-level golden comparison
 iverilog -o sim.out tb/tb_int8/tb_golden_compare.v rtl/rtl_int8/arrayMatMult.v && vvp sim.out
 ```
 
-**Vivado 측정**
+### 3. Vivado measurement
 
-1. 해당 정밀도의 `rtl/rtl_int*/` 소스와 `constraints/` XDC 추가
-2. Top 설정 — 자원·전력 측정: `power_bench_wrapper`, 보드 검증: `fpga_top_bram`
-3. Synthesis → Implementation (10 ns 제약)
-4. 자원: `report_utilization`에서 LUT / CARRY4 / FF / Slice
-5. 전력: Post-Implementation Timing Simulation → SAIF 생성 → `read_saif` → `report_power`
+1. Add the sources for the chosen precision from `rtl/rtl_int*/` plus the XDC files in `constraints/`.
+2. Set the top module — `power_bench_wrapper` for resource/power measurement, `fpga_top_bram` for board verification.
+3. Run Synthesis → Implementation with a 10 ns constraint.
+4. Read LUT / CARRY4 / FF / Slice from `report_utilization`.
+5. For power, run Post-Implementation Timing Simulation, generate SAIF, then `read_saif` → `report_power`.
 
 ```tcl
-# 시뮬레이터 콘솔
+# simulator console
 restart
-open_saif <경로>/power_int8_array.saif
+open_saif <path>/power_int8_array.saif
 log_saif [get_objects -r /tb_power_bench/dut/*]
 run 20us
 close_saif
 
-# Implemented Design 콘솔
-read_saif <경로>/power_int8_array.saif
+# Implemented Design console
+read_saif <path>/power_int8_array.saif
 report_power
 ```
 
-SAIF 파일명은 정밀도·구조별로 분리하며, 결과 리포트에서 Confidence Level High와 넷 매칭률 60% 이상을 확인한다. 테스트벤치의 wrapper 인스턴스 이름은 정밀도별로 다르므로(`power_bench_wrapper_INT4` 등) 프로젝트 전환 시 반드시 확인해야 한다.
+> **Note:** keep SAIF filenames separated by precision and structure, and confirm Confidence Level *High* with net matching above 60% in the resulting report. The wrapper instance name in the testbench differs per precision (`power_bench_wrapper_INT4`, etc.), so verify it whenever switching projects.
+
+---
+
+## Authors
+
+**2026 Summer URP (Undergraduate Research Program)**
+Department of Semiconductor Systems Engineering, Sungkyunkwan University
+Advisor: Prof. Yulhwa Kim
+
+Jayden Bae · Aiden Lee · Steven Ju · Jaehyeon Lee
